@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Tadashi Kadowaki
+# SPDX-License-Identifier: MIT
+
+description: |
+  Control scroll-wheel direction inversion for the forwarded BLE mouse.
+  Parameter: 0 = OFF, 1 = ON, 2 = TOGGLE (see dt-bindings/zmk/mouse_host_wheel.h).
+
+compatible: "zmk,behavior-mouse-host-wheel-invert"
+
+include: one_param.yaml

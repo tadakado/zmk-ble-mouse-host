@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Tadashi Kadowaki
+# SPDX-License-Identifier: MIT
+
+description: |
+  Forget the bonded external BLE mouse (if any), disconnect it, and stop
+  trying to reconnect until the pair behavior is triggered again.
+
+compatible: "zmk,behavior-mouse-host-unpair"
+
+include: zero_param.yaml

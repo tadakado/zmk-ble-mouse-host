@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Tadashi Kadowaki
+# SPDX-License-Identifier: MIT
+
+description: |
+  Forget the bonded external BLE mouse (if any) and actively scan to pair a
+  new one.
+
+compatible: "zmk,behavior-mouse-host-pair"
+
+include: zero_param.yaml

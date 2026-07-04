@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Tadashi Kadowaki
+# SPDX-License-Identifier: MIT
+
+description: |
+  Log the external BLE mouse's bond address, connection state, and parsed HID
+  report layout to the console.
+
+compatible: "zmk,behavior-mouse-host-dump"
+
+include: zero_param.yaml

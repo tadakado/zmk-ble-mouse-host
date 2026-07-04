@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Tadashi Kadowaki
+# SPDX-License-Identifier: MIT
+
+description: |
+  Virtual input device representing an external BLE mouse connected to this
+  keyboard over BLE HID (central / HID-over-GATT host). Pointer events received
+  from the mouse are emitted as Zephyr input events from this device, so a
+  zmk,input-listener bound to it forwards them to the active output.
+
+compatible: "zmk,ble-mouse-host"
+
+properties:
+  wheel-invert-usb:
+    type: boolean
+    description: |
+      Invert the forwarded mouse's scroll-wheel direction while the USB endpoint
+      is active. Applied automatically on every output-endpoint change.
+  wheel-invert-ble-profiles:
+    type: array
+    description: |
+      BLE profile indices (0-based) whose scroll-wheel direction is inverted,
+      e.g. <0 1>. Profiles not listed stay normal. Applied automatically on every
+      output-endpoint change (and after a reboot, when the saved profile
+      reconnects), so the direction tracks the target device.

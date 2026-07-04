@@ -1,0 +1,84 @@
+config ZMK_BLE_MOUSE_HOST
+    bool "Forward an external BLE mouse to the active output (BLE HID host / central)"
+    default y
+    depends on DT_HAS_ZMK_BLE_MOUSE_HOST_ENABLED
+    # Enable ZMK's pointing pipeline (and the input-listener that forwards our
+    # events) automatically, so simply instantiating the DT node works -- rather
+    # than silently staying disabled if the user forgets CONFIG_ZMK_POINTING=y.
+    # ZMK_POINTING has no dependencies of its own, so selecting it is safe.
+    select ZMK_POINTING
+    select BT_CENTRAL
+    select BT_OBSERVER
+    select BT_GATT_CLIENT
+    select BT_GATT_AUTO_DISCOVER_CCC
+    select BT_SMP
+    # Without this, Zephyr scans using only legacy HCI commands and the
+    # controller never reports BLE5 extended advertising PDUs at all -- mice
+    # that use extended advertising for their reconnect bursts (many modern
+    # ones do) become completely invisible to bt_le_scan_start(), with no
+    # error, just silence.
+    select BT_EXT_ADV
+    help
+      Act as a BLE central / HID-over-GATT host: connect to an external BLE
+      mouse and inject its pointer events into ZMK's pointing pipeline, so they
+      are forwarded to whichever output (BLE profile / USB) the keyboard is
+      currently using. Switching the keyboard's output therefore moves the
+      mouse with it.
+
+if ZMK_BLE_MOUSE_HOST
+
+config ZMK_BLE_MOUSE_HOST_MAX_REPORTS
+    int "Maximum HID input reports to subscribe to"
+    default 6
+    help
+      Upper bound on the number of notifying HID Input Report characteristics
+      tracked on the connected mouse (report protocol). Boot protocol uses one.
+
+config ZMK_BLE_MOUSE_HOST_FORGET_ON_BOOT
+    bool "Clear all BLE host profiles on boot (one-shot host re-pair helper)"
+    default n
+    help
+      On each boot, clear all BLE host profiles (zmk_ble_clear_all_bonds) and
+      re-advertise, so a host can pair freshly even without a &bt BT_CLR key.
+      Leaves the external mouse bond intact. A temporary helper to recover from
+      a stuck "taken profile" pairing; leave disabled for normal use.
+
+config ZMK_BLE_MOUSE_HOST_LOG_REPORTS
+    bool "Log every mouse input report (verbose)"
+    default n
+    help
+      Trace decoded pointer reports (buttons/dx/dy/wheel/pan) and a raw hexdump
+      to the log as the mouse moves. Useful when reverse-engineering a new
+      mouse's report layout, but very noisy. Leave disabled for normal use.
+
+module = ZMK_BLE_MOUSE_HOST
+module-str = ZMK BLE mouse host
+source "subsys/logging/Kconfig.template.log_config"
+
+endif
+
+# The pair/unpair/dump behaviors call into the core module and share its log
+# level, so they must not be built without it (depends on ZMK_BLE_MOUSE_HOST).
+config ZMK_BEHAVIOR_MOUSE_HOST_PAIR
+    bool
+    default y
+    depends on ZMK_BLE_MOUSE_HOST
+    depends on DT_HAS_ZMK_BEHAVIOR_MOUSE_HOST_PAIR_ENABLED
+
+config ZMK_BEHAVIOR_MOUSE_HOST_UNPAIR
+    bool
+    default y
+    depends on ZMK_BLE_MOUSE_HOST
+    depends on DT_HAS_ZMK_BEHAVIOR_MOUSE_HOST_UNPAIR_ENABLED
+
+config ZMK_BEHAVIOR_MOUSE_HOST_DUMP
+    bool
+    default y
+    depends on ZMK_BLE_MOUSE_HOST
+    depends on DT_HAS_ZMK_BEHAVIOR_MOUSE_HOST_DUMP_ENABLED
+
+config ZMK_BEHAVIOR_MOUSE_HOST_WHEEL_INVERT
+    bool
+    default y
+    depends on ZMK_BLE_MOUSE_HOST
+    depends on DT_HAS_ZMK_BEHAVIOR_MOUSE_HOST_WHEEL_INVERT_ENABLED
