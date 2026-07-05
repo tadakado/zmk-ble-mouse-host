@@ -751,6 +751,49 @@ void zmk_ble_mouse_host_unpair(void) {
     }
 }
 
+/* Temporarily stop all radio activity (scan / reconnect-initiate / the mouse
+ * link) WITHOUT forgetting the bond, then resume. Used to keep the RF quiet
+ * during a timing-critical IR bit-bang (see zmk_ir_tx_active below). */
+void zmk_ble_mouse_host_pause(void) {
+    mh_paused = true;
+    if (mode == MH_SCAN) {
+        bt_le_scan_stop();
+        mode = MH_IDLE;
+    }
+    if (mouse_conn) {
+        /* Disconnects a live link, or cancels an in-flight reconnect-initiate
+         * (the biggest RF-jitter source). on_disconnected -> mh_begin sees
+         * mh_paused and idles. */
+        bt_conn_disconnect(mouse_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    }
+}
+
+void zmk_ble_mouse_host_resume(void) {
+    if (!mh_paused) {
+        return;
+    }
+    mh_paused = false;
+    mh_begin(); /* reconnect to the bond (if any) */
+}
+
+/* zmk-ir hook (weak-overridden): quiet the mouse link's RF while IR TX bit-bangs
+ * the NEC waveform, so its interrupts don't jitter the timing. The hardware-PWM
+ * IR backend (CONFIG_IR_TX_HW_PWM) clocks the carrier in hardware and is immune
+ * to jitter, so there's nothing to quiet -- skip the pause/resume then (otherwise
+ * every IR press would needlessly drop and reconnect the mouse). */
+void zmk_ir_tx_active(bool active) {
+#if IS_ENABLED(CONFIG_IR_TX_HW_PWM)
+    ARG_UNUSED(active);
+#else
+    if (active) {
+        zmk_ble_mouse_host_pause();
+        k_msleep(30); /* let the scan/initiate/disconnect actually settle */
+    } else {
+        zmk_ble_mouse_host_resume();
+    }
+#endif
+}
+
 void zmk_ble_mouse_host_dump(void) {
     char s[BT_ADDR_LE_STR_LEN];
 

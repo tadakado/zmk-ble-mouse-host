@@ -18,6 +18,13 @@ void zmk_ble_mouse_host_unpair(void);
  * report layout to the console. Intended for a keymap trigger. */
 void zmk_ble_mouse_host_dump(void);
 
+/* Temporarily stop all RF activity (scan / reconnect / the mouse link) without
+ * forgetting the bond, then resume. Useful to keep the radio quiet during a
+ * timing-critical operation elsewhere (the module uses this to go quiet during
+ * an IR bit-bang via zmk-ir's zmk_ir_tx_active() hook). */
+void zmk_ble_mouse_host_pause(void);
+void zmk_ble_mouse_host_resume(void);
+
 /* Set scroll-wheel direction inversion for the forwarded mouse:
  * 0 = off, 1 = on, other = toggle. Normally driven automatically from the
  * active output endpoint (see the wheel-invert-* devicetree properties); this
