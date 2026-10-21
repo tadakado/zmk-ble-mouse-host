@@ -627,6 +627,28 @@ static bool mh_paused;
  * already-bonded mouse is automatic (have_bond branch) and unaffected. */
 static bool pairing_requested;
 
+/* Reconnect-failure log throttling: while the mouse sleeps, every 3 s attempt
+ * fails; log the first failure of a streak, then one summary per
+ * CONFIG_ZMK_BLE_MOUSE_HOST_RETRY_LOG_INTERVAL_SEC, and the recovery. */
+static uint32_t fail_streak;      /* failed attempts since the last success */
+static uint32_t fail_unlogged;    /* failures not yet reported */
+static int64_t fail_logged_ms;    /* uptime of the last failure log line */
+
+static bool fail_log_due(void) {
+    const int64_t interval_ms =
+        (int64_t)CONFIG_ZMK_BLE_MOUSE_HOST_RETRY_LOG_INTERVAL_SEC * 1000;
+    return fail_streak == 1 || interval_ms == 0 ||
+           k_uptime_get() - fail_logged_ms >= interval_ms;
+}
+
+static void fail_streak_end(void) {
+    if (fail_streak > 1) {
+        LOG_INF("mouse reconnected after %u failed attempt(s)", fail_streak);
+    }
+    fail_streak = 0;
+    fail_unlogged = 0;
+}
+
 static void mh_begin(void) {
     if (mouse_conn || connecting) {
         return;
@@ -641,7 +663,9 @@ static void mh_begin(void) {
          * directed reconnect adverts never reach a scan here (see file header). */
         char s[BT_ADDR_LE_STR_LEN];
         bt_addr_le_to_str(&mouse_addr, s, sizeof(s));
-        LOG_INF("connecting directly to bonded mouse %s", s);
+        if (fail_streak == 0) { /* not for each retry while the mouse sleeps */
+            LOG_INF("connecting directly to bonded mouse %s", s);
+        }
         pairing_attempt = false; /* reconnect to a known bond, not a fresh pair */
         connect_to(&mouse_addr);
     } else if (pairing_requested) {
@@ -673,12 +697,28 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
     connecting = false;
 
     if (err) {
-        LOG_ERR("mouse connection failed (err 0x%02x)", err);
+        fail_streak++;
+        fail_unlogged++;
+        if (fail_log_due()) {
+            if (fail_streak == 1) {
+                LOG_WRN("mouse connection failed (err 0x%02x); retrying (mouse asleep?)", err);
+            } else {
+                LOG_WRN("mouse still unreachable: %u failed attempt(s) in the last %u s "
+                        "(%u in total, last err 0x%02x)",
+                        fail_unlogged,
+                        (unsigned)((k_uptime_get() - fail_logged_ms) / 1000),
+                        fail_streak, err);
+            }
+            fail_logged_ms = k_uptime_get();
+            fail_unlogged = 0;
+        }
         bt_conn_unref(mouse_conn);
         mouse_conn = NULL;
         k_work_submit(&mh_retry_work);
         return;
     }
+
+    fail_streak_end();
 
     char addr[BT_ADDR_LE_STR_LEN];
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));

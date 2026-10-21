@@ -51,6 +51,15 @@ config ZMK_BLE_MOUSE_HOST_LOG_REPORTS
       to the log as the mouse moves. Useful when reverse-engineering a new
       mouse's report layout, but very noisy. Leave disabled for normal use.
 
+config ZMK_BLE_MOUSE_HOST_RETRY_LOG_INTERVAL_SEC
+    int "Log a failing mouse reconnect at most once per this many seconds"
+    default 600
+    help
+      While the bonded mouse is asleep / off, every reconnect attempt times out
+      (CONFIG_BT_CREATE_CONN_TIMEOUT, 3 s by default) and is retried. Log the
+      first failure of a streak, then at most one summary per this interval,
+      and a line when the mouse finally reconnects. 0 logs every attempt.
+
 module = ZMK_BLE_MOUSE_HOST
 module-str = ZMK BLE mouse host
 source "subsys/logging/Kconfig.template.log_config"
