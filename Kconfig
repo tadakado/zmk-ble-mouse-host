@@ -51,6 +51,19 @@ config ZMK_BLE_MOUSE_HOST_LOG_REPORTS
       to the log as the mouse moves. Useful when reverse-engineering a new
       mouse's report layout, but very noisy. Leave disabled for normal use.
 
+config ZMK_BLE_MOUSE_HOST_WAIT_FOR_SPLIT
+    bool "Hold mouse (re)connects while a split peripheral is disconnected"
+    default y
+    depends on ZMK_SPLIT_ROLE_CENTRAL && ZMK_SPLIT_BLE
+    help
+      The nRF controller can't scan and initiate a connection at the same time.
+      While the mouse is asleep, reconnect attempts keep the radio initiating,
+      so ZMK's split central can't scan for a peripheral that dropped out.
+      With this on, mouse (re)connect attempts pause whenever fewer than
+      CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS split links are up, and resume
+      when the split reconnects. (The mouse stays disconnected while the other
+      half is off.)
+
 config ZMK_BLE_MOUSE_HOST_RETRY_LOG_INTERVAL_SEC
     int "Log a failing mouse reconnect at most once per this many seconds"
     default 600

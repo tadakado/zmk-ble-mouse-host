@@ -101,6 +101,9 @@ static void mh_retry_work_cb(struct k_work *work) {
     mh_begin();
 }
 static K_WORK_DEFINE(mh_retry_work, mh_retry_work_cb);
+/* Same, after a pause: used when bt_conn_le_create() itself fails (e.g. -EAGAIN
+ * while ZMK's split central is scanning), so we don't spin on it. */
+static K_WORK_DELAYABLE_DEFINE(mh_retry_later, mh_retry_work_cb);
 
 /* ---- settings (persist the bonded mouse address) ----------------------- */
 
@@ -543,16 +546,33 @@ static bool is_hid_mouse_ad(struct bt_data *data, void *user_data) {
     return true;
 }
 
+/* The explicit scanner is shared with ZMK's split central, which keeps its own
+ * "scanning" state: only ever stop a scan that we started (pairing), or the
+ * split central would silently stop looking for its peripheral. */
+static void mh_scan_stop(void) {
+    if (mode == MH_SCAN) {
+        bt_le_scan_stop();
+        mode = MH_IDLE;
+    }
+}
+
 static void connect_to(const bt_addr_le_t *addr) {
+    static int last_create_err;
+
     connecting = true;
-    bt_le_scan_stop();
+    mh_scan_stop();
 
     int err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, MH_CONN_PARAM, &mouse_conn);
     if (err) {
-        LOG_ERR("create connection failed (err %d)", err);
+        if (err != last_create_err) {
+            LOG_WRN("create connection failed (err %d); retrying in 1 s", err);
+        }
+        last_create_err = err;
         connecting = false;
-        k_work_submit(&mh_retry_work);
+        k_work_reschedule(&mh_retry_later, K_SECONDS(1));
+        return;
     }
+    last_create_err = 0;
 }
 
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
@@ -649,13 +669,51 @@ static void fail_streak_end(void) {
     fail_unlogged = 0;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_BLE_MOUSE_HOST_WAIT_FOR_SPLIT)
+static void count_split_link(struct bt_conn *conn, void *data) {
+    struct bt_conn_info info;
+
+    if (conn == mouse_conn || bt_conn_get_info(conn, &info) != 0 ||
+        info.role != BT_CONN_ROLE_CENTRAL || info.state != BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+    (*(int *)data)++;
+}
+
+/* Any central-role link other than the mouse is a split peripheral. */
+static bool split_missing(void) {
+    int n = 0;
+
+    bt_conn_foreach(BT_CONN_TYPE_LE, count_split_link, &n);
+    return n < CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS;
+}
+#else
+static bool split_missing(void) { return false; }
+#endif
+
 static void mh_begin(void) {
+    static bool split_wait_logged;
+
     if (mouse_conn || connecting) {
         return;
     }
     if (mh_paused) {
         LOG_INF("mouse host paused; waiting for a pairing trigger");
         return;
+    }
+    /* The controller can't scan while initiating, and ZMK's split central must
+     * scan to find a lost peripheral: hold off until the split is back.
+     * on_connected() resumes us when it reconnects. */
+    if (split_missing()) {
+        if (!split_wait_logged) {
+            LOG_INF("split peripheral not connected; holding mouse (re)connect");
+            split_wait_logged = true;
+        }
+        return;
+    }
+    if (split_wait_logged) {
+        LOG_INF("split peripheral connected; resuming mouse (re)connect");
+        split_wait_logged = false;
     }
     if (have_bond) {
         /* Connect directly to the known bonded address (bt_conn_le_create,
@@ -686,6 +744,11 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
      * ignore any conn that isn't ours. connect_to() sets mouse_conn before this
      * can fire for our own attempt, so the identity check is sufficient. */
     if (conn != mouse_conn) {
+        /* Not ours. If it's a new link (e.g. the split peripheral coming back),
+         * a mouse (re)connect held back by split_missing() may go now. */
+        if (!err && !mouse_conn && !connecting) {
+            k_work_submit(&mh_retry_work);
+        }
         return;
     }
 
@@ -772,8 +835,7 @@ void zmk_ble_mouse_host_pair(void) {
          * fresh scan. */
         bt_conn_disconnect(mouse_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
     } else {
-        bt_le_scan_stop(); /* in case a stale scan for the old bond is running */
-        mode = MH_IDLE;
+        mh_scan_stop(); /* in case a stale pairing scan is running */
         mh_begin();
     }
 }
@@ -786,8 +848,7 @@ void zmk_ble_mouse_host_unpair(void) {
     if (mouse_conn) {
         bt_conn_disconnect(mouse_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
     } else {
-        bt_le_scan_stop();
-        mode = MH_IDLE;
+        mh_scan_stop();
     }
 }
 
@@ -796,10 +857,7 @@ void zmk_ble_mouse_host_unpair(void) {
  * during a timing-critical IR bit-bang (see zmk_ir_tx_active below). */
 void zmk_ble_mouse_host_pause(void) {
     mh_paused = true;
-    if (mode == MH_SCAN) {
-        bt_le_scan_stop();
-        mode = MH_IDLE;
-    }
+    mh_scan_stop();
     if (mouse_conn) {
         /* Disconnects a live link, or cancels an in-flight reconnect-initiate
          * (the biggest RF-jitter source). on_disconnected -> mh_begin sees
